@@ -1,151 +1,151 @@
 # 🔍 Real-time Anomaly Detection System
 
-실시간 시계열 데이터 이상 탐지 시스템입니다. 25,000개 feature를 가진 시계열 데이터를 수신하여 Feature-wise One-Class SVM 모델로 이상을 탐지하고 알람을 전송합니다.
+A real-time time-series data anomaly detection system. It receives time-series data with 25,000 features, detects anomalies using a Feature-wise One-Class SVM model, and sends alerts.
 
 
 <details>
-<summary><h2>📋 요구사항 명세서 (클릭하여 펼치기)</h2></summary>
+<summary><h2>📋 Requirements Specification (Click to expand)</h2></summary>
 
-### 1. 개요 (Overview)
+### 1. Overview
 
-본 문서는 제조 현장의 센서 데이터(온도, 진동 등)를 수집하는 **NestJS(Main Server)** 와 이를 분석하여 이상 징후를 탐지하는 **Python FastAPI(AI Engine)** 간의 연동 규격을 정의한다.
-
----
-
-### 2. 시스템 아키텍처 (Architecture)
-
-| 항목 | 규격 |
-|------|------|
-| **통신 프로토콜** | HTTP/1.1 (REST API) |
-| **통신 패턴** | 비동기 Webhook |
-| **데이터 포맷** | JSON (`Content-Type: application/json`) |
-
-#### 통신 방향
-- **Forward**: NestJS → Python (데이터 전송, 응답 대기 X)
-- **Backward**: Python → NestJS (이상 감지 시에만 호출)
+This document defines the integration specifications between **NestJS (Main Server)**, which collects sensor data (temperature, vibration, etc.) from manufacturing sites, and **Python FastAPI (AI Engine)**, which analyzes this data to detect anomalies.
 
 ---
 
-### 3. 핵심 요구사항 (Functional Requirements)
+### 2. System Architecture
 
-#### 3.1. 데이터 전송 (NestJS → Python)
+| Item | Specification |
+|------|---------------|
+| **Communication Protocol** | HTTP/1.1 (REST API) |
+| **Communication Pattern** | Asynchronous Webhook |
+| **Data Format** | JSON (`Content-Type: application/json`) |
 
-| 항목 | 요구사항 |
-|------|----------|
-| **주기** | 1초 |
-| **용량** | 최대 500KB |
-| **데이터 구조** | 약 25,000개의 Key-Value Pair |
-| **엔드포인트** | `POST /data-enqueue` |
-| **응답 처리** | Python 서버는 데이터를 메모리 큐(Queue)에 적재 후 즉시 `202 Accepted` 반환 (Blocking 방지) |
-| **검증** | 데이터 타입 및 구조 검증 필요 |
-
-#### 3.2. AI 모델 관리 (Model Serving)
-
-##### 모델 프리로딩 (Pre-loading)
-- ✅ 서버 시작(Startup) 시점에 모델을 GPU/CPU 메모리에 로드
-- ✅ 로드 실패 시 서버 구동 자체를 차단하거나 에러 상태로 기동
-
-##### 배치 처리 (Batching)
-- ✅ 1초에 한 번 들어오는 25,000개 데이터를 그대로 처리하거나, 내부 큐에서 일정량(예: 64 프레임)이 찼을 때 `model.predict()` 실행
-- ✅ 배치 크기 옵션 처리 (`INFERENCE_BATCH_SIZE` 환경 변수)
-
-#### 3.3. 결과 피드백 (Python → NestJS)
-
-| 항목 | 요구사항 |
-|------|----------|
-| **조건** | AI 추론 결과가 설정된 임계치(Threshold)를 초과하여 '이상(Anomaly)'으로 판단될 경우에만 전송 |
-| **엔드포인트** | `POST {NEST_HOST}/api/v1/alert` (NestJS 측 구현) |
-| **재시도 전략** | NestJS 서버 일시 장애를 대비해 HTTP 호출 실패 시 1~5회 재시도 (Exponential Backoff) |
+#### Communication Direction
+- **Forward**: NestJS → Python (Data transmission, no response waiting)
+- **Backward**: Python → NestJS (Called only when anomaly detected)
 
 ---
 
-### 4. 안정성 및 운영 요구사항 (Reliability & Ops)
+### 3. Functional Requirements
 
-#### 4.1. 헬스 체크 (Health Check)
+#### 3.1. Data Transmission (NestJS → Python)
 
-| Probe | 엔드포인트 | 목적 | 응답 |
-|-------|-----------|------|------|
-| **Liveness** | `GET /health/live` | 서버 프로세스가 떠 있는가? | `200 OK` (가벼운 로직) |
-| **Readiness** | `GET /health/ready` | AI 모델이 로드되어 추론 가능한가? | 준비 완료: `200 OK`, 로딩 중: `503 Service Unavailable` |
+| Item | Requirement |
+|------|-------------|
+| **Interval** | 1 second |
+| **Size** | Max 500KB |
+| **Data Structure** | Approximately 25,000 Key-Value Pairs |
+| **Endpoint** | `POST /data-enqueue` |
+| **Response Handling** | Python server loads data into memory queue and immediately returns `202 Accepted` (Blocking prevention) |
+| **Validation** | Data type and structure validation required |
 
-##### Readiness 체크 로직
-- 모델 변수가 `None`이 아닌지 확인
-- GPU 연결 상태 확인
+#### 3.2. AI Model Management (Model Serving)
 
-#### 4.2. 로깅 및 모니터링 (Observability)
+##### Model Pre-loading
+- ✅ Load model into GPU/CPU memory at server startup
+- ✅ Block server startup or start in error state if loading fails
 
-> 단순 텍스트 로그가 아닌 **JSON 구조화 로그(Structured Logging)** 사용 (추후 ELK 등에서 분석)
+##### Batch Processing
+- ✅ Process 25,000 data points arriving every second as-is, or execute `model.predict()` when internal queue reaches a certain amount (e.g., 64 frames)
+- ✅ Batch size option handling (`INFERENCE_BATCH_SIZE` environment variable)
 
-##### 필수 기록 항목
+#### 3.3. Result Feedback (Python → NestJS)
 
-| 항목 | 설명 | 구현 상태 |
-|------|------|-----------|
-| **Latency** | 데이터 수신 ~ 추론 완료까지 걸린 시간 (ms 단위) | ✅ |
-| **Input/Output** | 이상 감지 시, 당시의 입력 데이터 ID(Timestamp)와 추론 스코어 | ✅ |
-| **Resource** | 추론 시점의 CPU/GPU 메모리 점유율 | ✅ |
-| **Error** | 데이터 파싱 에러, 모델 연산 에러 등 Exception Traceback | ✅ |
+| Item | Requirement |
+|------|-------------|
+| **Condition** | Send only when AI inference result exceeds configured threshold and is judged as 'Anomaly' |
+| **Endpoint** | `POST {NEST_HOST}/api/v1/alert` (Implemented on NestJS side) |
+| **Retry Strategy** | 1-5 retries with Exponential Backoff on HTTP call failure to handle temporary NestJS server failures |
+
+---
+
+### 4. Reliability & Operations Requirements
+
+#### 4.1. Health Check
+
+| Probe | Endpoint | Purpose | Response |
+|-------|----------|---------|----------|
+| **Liveness** | `GET /health/live` | Is the server process running? | `200 OK` (Lightweight logic) |
+| **Readiness** | `GET /health/ready` | Is the AI model loaded and ready for inference? | Ready: `200 OK`, Loading: `503 Service Unavailable` |
+
+##### Readiness Check Logic
+- Verify model variable is not `None`
+- Check GPU connection status
+
+#### 4.2. Logging & Monitoring (Observability)
+
+> Use **JSON Structured Logging** instead of plain text logs (for analysis in ELK, etc.)
+
+##### Required Log Items
+
+| Item | Description | Implementation Status |
+|------|-------------|----------------------|
+| **Latency** | Time from data reception to inference completion (in ms) | ✅ |
+| **Input/Output** | Input data ID (Timestamp) and inference score when anomaly detected | ✅ |
+| **Resource** | CPU/GPU memory utilization at inference time | ✅ |
+| **Error** | Exception Traceback for data parsing errors, model computation errors, etc. | ✅ |
 
 </details>
 
-## 📁 프로젝트 구조
+## 📁 Project Structure
 
 ```
-├── python-server/          # Python AI 추론 서버 (FastAPI)
-│   ├── main.py             # FastAPI 애플리케이션 엔트리포인트
-│   ├── ai/                 # AI 모델 관련
-│   │   ├── model.py        # 모델 클래스 (DummyModel, FeatureWiseOCSVM)
-│   │   └── models/         # 학습된 모델 파일
+├── python-server/          # Python AI Inference Server (FastAPI)
+│   ├── main.py             # FastAPI application entrypoint
+│   ├── ai/                 # AI model related
+│   │   ├── model.py        # Model classes (DummyModel, FeatureWiseOCSVM)
+│   │   └── models/         # Trained model files
 │   │       ├── featurewise_ocsvm_unified.pth
 │   │       └── featurewise_ocsvm_metadata.json
 │   ├── config/
-│   │   └── settings.py     # 환경 설정 (pydantic-settings)
+│   │   └── settings.py     # Configuration (pydantic-settings)
 │   ├── core/
-│   │   ├── message_queue.py  # 비동기 메시지 큐
-│   │   ├── notifier.py       # NestJS 알람 전송
-│   │   └── backoff.py        # 재시도 로직 (Exponential Backoff)
+│   │   ├── message_queue.py  # Async message queue
+│   │   ├── notifier.py       # NestJS alert sender
+│   │   └── backoff.py        # Retry logic (Exponential Backoff)
 │   └── processors/
-│       ├── worker.py         # 배치 추론 워커
-│       └── resource_check.py # GPU/CPU 리소스 모니터링
+│       ├── worker.py         # Batch inference worker
+│       └── resource_check.py # GPU/CPU resource monitoring
 │
-└── nestjs-server/          # NestJS 백엔드 서버
+└── nestjs-server/          # NestJS Backend Server
     └── src/
-        ├── main.ts         # NestJS 애플리케이션 엔트리포인트
-        ├── data/           # 데이터 생성 및 전송 모듈
-        └── alert/          # 알람 수신 및 DB 저장 모듈
+        ├── main.ts         # NestJS application entrypoint
+        ├── data/           # Data generation and transmission module
+        └── alert/          # Alert reception and DB storage module
 ```
 
-## 🏗️ 시스템 아키텍처
+## 🏗️ System Architecture
 
 ```mermaid
 flowchart TB
     subgraph NestJS["🟢 NestJS Server (Port 3000)"]
-        DataController["POST /data/send<br/>25,000 features 생성"]
-        AlertController["POST /api/v1/alert<br/>알람 수신"]
+        DataController["POST /data/send<br/>Generate 25,000 features"]
+        AlertController["POST /api/v1/alert<br/>Receive alerts"]
     end
 
     subgraph Python["🔵 Python AI Server (Port 9000)"]
-        Enqueue["POST /data-enqueue<br/>• 압축 해제<br/>• 데이터 검증"]
+        Enqueue["POST /data-enqueue<br/>• Decompress<br/>• Validate data"]
         Queue[("AsyncQueue<br/>maxsize=100")]
         
         subgraph Worker["⚙️ Background Worker"]
-            Window["슬라이딩 윈도우<br/>(size=5)"]
-            Batch["배치 수집<br/>(size=64)"]
+            Window["Sliding Window<br/>(size=5)"]
+            Batch["Batch Collection<br/>(size=64)"]
             Model["🧠 Feature-wise OCSVM<br/>[B,5,25000] → [B,25000]"]
-            Detect{"이상 탐지<br/>threshold=0.9"}
+            Detect{"Anomaly Detection<br/>threshold=0.9"}
         end
     end
 
     subgraph DB["🗄️ Database"]
-        PostgreSQL[(PostgreSQL<br/>Alert 저장)]
+        PostgreSQL[(PostgreSQL<br/>Store Alerts)]
     end
 
-    DataController -->|"gzip 압축"| Enqueue
+    DataController -->|"gzip compression"| Enqueue
     Enqueue --> Queue
     Queue --> Window
     Window --> Batch
     Batch --> Model
     Model --> Detect
-    Detect -->|"이상 감지 시"| AlertController
+    Detect -->|"On anomaly detected"| AlertController
     AlertController --> PostgreSQL
 
     style NestJS fill:#d4edda,stroke:#28a745
@@ -154,7 +154,7 @@ flowchart TB
     style DB fill:#f8d7da,stroke:#dc3545
 ```
 
-### 시퀀스 다이어그램
+### Sequence Diagram
 
 ```mermaid
 sequenceDiagram
@@ -167,73 +167,73 @@ sequenceDiagram
     participant DB as PostgreSQL
 
     Client->>NestJS: POST /data/send
-    NestJS->>NestJS: 25,000 features 생성
-    NestJS->>NestJS: gzip 압축
+    NestJS->>NestJS: Generate 25,000 features
+    NestJS->>NestJS: gzip compression
     NestJS->>Python: POST /data-enqueue (compressed)
-    Python->>Python: 압축 해제 & 검증
-    Python->>Queue: 데이터 저장
+    Python->>Python: Decompress & Validate
+    Python->>Queue: Store data
     Python-->>NestJS: 202 Accepted
 
-    loop 배치 처리
-        Queue->>Worker: 데이터 수신
-        Worker->>Worker: 슬라이딩 윈도우 구성 (5개)
-        Worker->>Worker: 배치 수집 (64개)
-        Worker->>Model: 추론 요청 [64,5,25000]
-        Model-->>Worker: 이상 점수 [64,25000]
+    loop Batch Processing
+        Queue->>Worker: Receive data
+        Worker->>Worker: Build sliding window (5 points)
+        Worker->>Worker: Collect batch (64 windows)
+        Worker->>Model: Inference request [64,5,25000]
+        Model-->>Worker: Anomaly scores [64,25000]
         
-        alt 이상 탐지 (score >= 0.9)
+        alt Anomaly detected (score >= 0.9)
             Worker->>NestJS: POST /api/v1/alert
-            NestJS->>DB: 알람 저장
+            NestJS->>DB: Store alert
             NestJS-->>Worker: 200 OK
         end
     end
 ```
 
-## 🧠 AI 모델
+## 🧠 AI Model
 
 ### Feature-wise Linear One-Class SVM
 
-- **입력**: `[batch, window_size(5), n_features(25000)]`
-- **출력**: `[batch, n_features(25000)]` - 각 feature별 이상 점수
-- **구조**: 25,000개의 독립적인 Linear One-Class SVM 모델
+- **Input**: `[batch, window_size(5), n_features(25000)]`
+- **Output**: `[batch, n_features(25000)]` - Anomaly score per feature
+- **Structure**: 25,000 independent Linear One-Class SVM models
 
 ```python
-# 추론 예시
+# Inference example
 x = torch.randn(64, 5, 25000)  # [batch, window, features]
-scores = model.predict(x)       # [batch, features] - 이상 점수
+scores = model.predict(x)       # [batch, features] - anomaly scores
 ```
 
-## ⚙️ 설정
+## ⚙️ Configuration
 
 ### Python Server (`config/settings.py`)
 
-| 환경 변수 | 기본값 | 설명 |
-|-----------|--------|------|
-| `APP_HOST` | `0.0.0.0` | FastAPI 서버 호스트 |
-| `APP_PORT` | `9000` | FastAPI 서버 포트 |
-| `NESTJS_URL` | `http://localhost:3000` | NestJS 서버 URL |
-| `NESTJS_ANOMALY_ENDPOINT` | `/api/v1/alert` | 알람 엔드포인트 |
-| `QUEUE_MAX_SIZE` | `100` | 메시지 큐 최대 크기 |
-| `INFERENCE_BATCH_SIZE` | `64` | 배치 추론 크기 |
-| `DEFAULT_MODEL_NAME` | `featurewise_ocsvm` | 사용할 모델 |
-| `DEFAULT_DEVICE` | `auto` | 디바이스 (`auto`, `cuda`, `cpu`) |
-| `MAX_RETRIES` | `5` | 재시도 횟수 |
+| Environment Variable | Default | Description |
+|---------------------|---------|-------------|
+| `APP_HOST` | `0.0.0.0` | FastAPI server host |
+| `APP_PORT` | `9000` | FastAPI server port |
+| `NESTJS_URL` | `http://localhost:3000` | NestJS server URL |
+| `NESTJS_ANOMALY_ENDPOINT` | `/api/v1/alert` | Alert endpoint |
+| `QUEUE_MAX_SIZE` | `100` | Max message queue size |
+| `INFERENCE_BATCH_SIZE` | `64` | Batch inference size |
+| `DEFAULT_MODEL_NAME` | `featurewise_ocsvm` | Model to use |
+| `DEFAULT_DEVICE` | `auto` | Device (`auto`, `cuda`, `cpu`) |
+| `MAX_RETRIES` | `5` | Number of retries |
 
-## 🚀 실행 방법
+## 🚀 Getting Started
 
 ### 1. Python AI Server
 
 ```bash
 cd python-server
 
-# 가상환경 생성 및 활성화
+# Create and activate virtual environment
 python -m venv venv
 source venv/bin/activate  # Windows: venv\Scripts\activate
 
-# 의존성 설치
+# Install dependencies
 pip install fastapi uvicorn torch numpy httpx pydantic-settings python-json-logger pynvml psutil
 
-# 서버 실행
+# Run server
 uvicorn main:app --host 0.0.0.0 --port 9000
 ```
 
@@ -242,66 +242,66 @@ uvicorn main:app --host 0.0.0.0 --port 9000
 ```bash
 cd nestjs-server
 
-# 의존성 설치
+# Install dependencies
 npm install
 
-# 개발 모드 실행
+# Run in development mode
 npm run start:dev
 
-# 프로덕션 빌드 및 실행
+# Build and run in production
 npm run build
 npm run start:prod
 ```
 
-## 📡 API 엔드포인트
+## 📡 API Endpoints
 
 ### Python AI Server (Port 9000)
 
-| Method | Endpoint | 설명 |
-|--------|----------|------|
-| `POST` | `/data-enqueue` | gzip 압축된 시계열 데이터 수신 |
-| `GET` | `/health/live` | Liveness 체크 |
-| `GET` | `/health/ready` | Readiness 체크 (모델 로드 상태, GPU 가용성) |
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/data-enqueue` | Receive gzip-compressed time-series data |
+| `GET` | `/health/live` | Liveness check |
+| `GET` | `/health/ready` | Readiness check (model load status, GPU availability) |
 
 ### NestJS Server (Port 3000)
 
-| Method | Endpoint | 설명 |
-|--------|----------|------|
-| `POST` | `/data/send` | 테스트 데이터 생성 및 AI 서버로 전송 |
-| `POST` | `/api/v1/alert` | AI 서버로부터 이상 알람 수신 |
+| Method | Endpoint | Description |
+|--------|----------|-------------|
+| `POST` | `/data/send` | Generate test data and send to AI server |
+| `POST` | `/api/v1/alert` | Receive anomaly alerts from AI server |
 
-## 📊 데이터 흐름
+## 📊 Data Flow
 
-1. **데이터 생성**: NestJS에서 25,000개 feature 데이터 생성
-2. **압축 전송**: gzip 압축 후 Python 서버로 전송
-3. **큐잉**: 비동기 큐에 데이터 저장
-4. **윈도우 구성**: 슬라이딩 윈도우 (크기 5)로 시계열 구성
-5. **배치 수집**: 64개 윈도우 수집
-6. **모델 추론**: Feature-wise OCSVM으로 이상 점수 계산
-7. **이상 탐지**: threshold (0.9) 초과 시 이상으로 판단
-8. **알람 전송**: NestJS로 이상 feature 정보 전송
-9. **DB 저장**: PostgreSQL에 알람 기록
+1. **Data Generation**: NestJS generates 25,000 feature data
+2. **Compressed Transmission**: gzip compression and send to Python server
+3. **Queuing**: Store data in async queue
+4. **Window Construction**: Build time-series with sliding window (size 5)
+5. **Batch Collection**: Collect 64 windows
+6. **Model Inference**: Calculate anomaly scores with Feature-wise OCSVM
+7. **Anomaly Detection**: Judge as anomaly if threshold (0.9) exceeded
+8. **Alert Transmission**: Send anomalous feature info to NestJS
+9. **DB Storage**: Record alert in PostgreSQL
 
-## 🔧 주요 기능
+## 🔧 Key Features
 
-### 배치 추론 최적화
-- GPU 가속 지원 (CUDA)
-- 배치 단위 추론으로 throughput 최적화
-- ThreadPoolExecutor를 통한 비동기 추론
+### Batch Inference Optimization
+- GPU acceleration support (CUDA)
+- Throughput optimization with batch inference
+- Async inference via ThreadPoolExecutor
 
-### 재시도 로직
-- Exponential Backoff 적용
-- 네트워크 오류 및 5xx 에러 시 자동 재시도
+### Retry Logic
+- Exponential Backoff applied
+- Auto retry on network errors and 5xx errors
 
-### 리소스 모니터링
-- GPU: VRAM 사용률, GPU 연산 사용률 (pynvml)
-- CPU: RAM 사용률, CPU 사용률 (psutil)
+### Resource Monitoring
+- GPU: VRAM utilization, GPU compute utilization (pynvml)
+- CPU: RAM utilization, CPU utilization (psutil)
 
-### 로깅
-- JSON 형식 구조화 로깅
-- 추론 latency, 배치 크기, 이상 feature 수 등 메트릭 기록
+### Logging
+- JSON structured logging
+- Metrics recording: inference latency, batch size, anomaly feature count, etc.
 
-## 📦 기술 스택
+## 📦 Tech Stack
 
 ### Python AI Server
 - **Framework**: FastAPI
@@ -318,6 +318,6 @@ npm run start:prod
 - **HTTP Client**: axios, axios-retry
 - **Validation**: class-validator, class-transformer
 
-## 📝 라이선스
+## 📝 License
 
 This project is UNLICENSED.
