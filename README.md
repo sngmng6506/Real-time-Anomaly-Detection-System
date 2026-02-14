@@ -8,7 +8,7 @@ A real-time time-series data anomaly detection system. It receives time-series d
 
 ### 1. Overview
 
-This document defines the integration specifications between **NestJS (Main Server)**, which collects sensor data (temperature, vibration, etc.) from manufacturing sites, and **Python FastAPI (AI Engine)**, which analyzes this data to detect anomalies.
+This document defines the integration specifications between **NestJS (Main Server)**, which collects sensor data (temperature, vibration, etc.) from manufacturing sites, and **Python FastAPI (AI Engine)**, which analyzes this data to detect anomalies
 
 ---
 
